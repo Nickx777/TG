@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import Onboarding from "./components/Onboarding";
 import Sidebar from "./components/Sidebar";
 import FileExplorer from "./components/FileExplorer";
@@ -11,6 +11,7 @@ import FilePreviewModal from "./components/FilePreviewModal";
 import ShareViewer from "./components/ShareViewer";
 import { TelegramConfig, DriveFile, DriveFolder, ActiveUpload, SharedFilePayload } from "./types";
 import { CloudLightning, ShieldCheck, RefreshCw, Layers, LogOut } from "lucide-react";
+import { backupMetadataToTelegram } from "./lib/telegram";
 
 export default function App() {
   // --- 1. ROUTING & SHARE ENGINE ---
@@ -50,6 +51,12 @@ export default function App() {
   const [activeUploads, setActiveUploads] = useState<ActiveUpload[]>([]);
   const [recentSyncTime, setRecentSyncTime] = useState<string | null>(null);
 
+  // Background Live Sync Mechanism
+  const [isSyncingBackground, setIsSyncingBackground] = useState(false);
+  const [lastSyncedMessageId, setLastSyncedMessageId] = useState<number | null>(null);
+  const lastSavedJson = useRef<string>("");
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+
   // --- 3. PERSISTENCE LAYER ---
   useEffect(() => {
     // Read cached items from LocalStorage on mount
@@ -57,6 +64,7 @@ export default function App() {
     const savedFiles = localStorage.getItem("tg_drive_files");
     const savedFolders = localStorage.getItem("tg_drive_folders");
     const savedSync = localStorage.getItem("tg_drive_synctime");
+    const savedMsgId = localStorage.getItem("tg_drive_last_message_id");
 
     if (savedConfig) {
       try {
@@ -85,7 +93,121 @@ export default function App() {
     if (savedSync) {
       setRecentSyncTime(savedSync);
     }
+
+    if (savedMsgId) {
+      setLastSyncedMessageId(parseInt(savedMsgId, 10));
+    }
   }, []);
+
+  // --- 4a. AUTO BACKUP SYNC EFFECT ---
+  useEffect(() => {
+    if (!config) return;
+
+    const currentJson = JSON.stringify({ files, folders });
+    
+    // On first load after config is active, populate the ref so we don't auto-save immediately
+    if (!lastSavedJson.current) {
+      lastSavedJson.current = currentJson;
+      return;
+    }
+
+    // If no real change, do not trigger a new backup file
+    if (lastSavedJson.current === currentJson) {
+      return;
+    }
+
+    // Debounce to avoid flooding/overlapping backups while multiple file uploads are completing
+    const timer = setTimeout(async () => {
+      setIsSyncingBackground(true);
+      try {
+        const result = await backupMetadataToTelegram(config.botToken, config.chatId, { files, folders });
+        if (result) {
+          lastSavedJson.current = currentJson;
+          setLastSyncedMessageId(result.messageId);
+          localStorage.setItem("tg_drive_last_message_id", String(result.messageId));
+          
+          const time = new Date().toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+          setRecentSyncTime(time);
+          localStorage.setItem("tg_drive_synctime", time);
+          console.log("Telemetry background registry synced.");
+        }
+      } catch (err) {
+        console.error("Auto background backup failed:", err);
+      } finally {
+        setIsSyncingBackground(false);
+      }
+    }, 2500); // 2.5s debounce
+
+    return () => clearTimeout(timer);
+  }, [files, folders, config]);
+
+  // --- 4b. REAL-TIME LIVE UPDATE POLLING EFFECT ---
+  useEffect(() => {
+    if (!config) return;
+
+    let isPolling = false;
+
+    const pollInterval = setInterval(async () => {
+      // If we are currently uploading files or syncing background, do not poll
+      if (activeUploads.length > 0 || isSyncingBackground || isPolling) {
+        return;
+      }
+
+      isPolling = true;
+      try {
+        // Fetch Chat details from Telegram to inspect pinned_message
+        const chatUrl = `https://api.telegram.org/bot${config.botToken.trim()}/getChat?chat_id=${config.chatId.trim()}`;
+        const chatRes = await fetch(chatUrl);
+        if (chatRes.ok) {
+          const chatData = await chatRes.json();
+          if (chatData.ok && chatData.result && chatData.result.pinned_message) {
+            const pinnedMessage = chatData.result.pinned_message;
+            const messageId = pinnedMessage.message_id;
+
+            // If the telegram pinned message ID has changed, it means another device updated it!
+            if (messageId !== lastSyncedMessageId) {
+              console.log(`Live Update Detected! Local message ID: ${lastSyncedMessageId}, Cloud message ID: ${messageId}`);
+              
+              const doc = pinnedMessage.document;
+              if (doc && doc.file_name === "tg_drive_metadata.json") {
+                const fileId = doc.file_id;
+                const proxyUrl = `/api/telegram/download?token=${config.botToken}&file_id=${fileId}&action=preview&filename=tg_drive_metadata.json`;
+                const downloadRes = await fetch(proxyUrl);
+                
+                if (downloadRes.ok) {
+                  const data = await downloadRes.json();
+                  if (data && Array.isArray(data.files) && Array.isArray(data.folders)) {
+                    // Update current JSON copy to prevent this device from back-syncing downloaded data
+                    const nextJson = JSON.stringify({ files: data.files, folders: data.folders });
+                    lastSavedJson.current = nextJson;
+
+                    setFiles(data.files);
+                    setFolders(data.folders);
+                    localStorage.setItem("tg_drive_files", JSON.stringify(data.files));
+                    localStorage.setItem("tg_drive_folders", JSON.stringify(data.folders));
+
+                    setLastSyncedMessageId(messageId);
+                    localStorage.setItem("tg_drive_last_message_id", String(messageId));
+
+                    const time = new Date().toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+                    setRecentSyncTime(time);
+                    localStorage.setItem("tg_drive_synctime", time);
+                    console.log("Device has been live updated with new files list!");
+                  }
+                }
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.error("Polled live update fetch failed:", err);
+      } finally {
+        isPolling = false;
+      }
+    }, 6000); // Polling every 6 seconds
+
+    return () => clearInterval(pollInterval);
+  }, [config, lastSyncedMessageId, activeUploads, isSyncingBackground]);
 
   // Cache state to localStorage when folders or files update for instant load speeds
   const updateFilesState = (newFilesOrUpdater: DriveFile[] | ((prev: DriveFile[]) => DriveFile[])) => {
@@ -104,17 +226,25 @@ export default function App() {
     });
   };
 
-  // --- 4. HANDLERS ---
+  // --- 5. HANDLERS ---
   const handleOnboardingComplete = (
     newConfig: TelegramConfig,
-    restoredData?: { files: DriveFile[]; folders: DriveFolder[] } | null
+    restoredData?: { files: DriveFile[]; folders: DriveFolder[]; messageId?: number } | null
   ) => {
     setConfig(newConfig);
     localStorage.setItem("tg_drive_config", JSON.stringify(newConfig));
 
     if (restoredData) {
+      const currentJson = JSON.stringify({ files: restoredData.files, folders: restoredData.folders });
+      lastSavedJson.current = currentJson;
+
       if (restoredData.files) updateFilesState(restoredData.files);
       if (restoredData.folders) updateFoldersState(restoredData.folders);
+      
+      if (restoredData.messageId) {
+        setLastSyncedMessageId(restoredData.messageId);
+        localStorage.setItem("tg_drive_last_message_id", String(restoredData.messageId));
+      }
       const time = new Date().toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
       setRecentSyncTime(time);
       localStorage.setItem("tg_drive_synctime", time);
@@ -265,6 +395,16 @@ export default function App() {
       <header className="h-16 border-b border-slate-200 bg-white px-6 flex items-center justify-between shrink-0 shadow-xs" id="app-global-header">
         
         <div className="flex items-center gap-3" id="app-logo-box">
+          {/* Mobile hamburger menu toggle */}
+          <button
+            onClick={() => setMobileSidebarOpen(true)}
+            className="lg:hidden p-2 -ml-2 text-slate-600 hover:bg-slate-150 rounded-xl transition cursor-pointer"
+            id="mobile-menu-toggle-btn"
+            title="Open Space Settings"
+          >
+            <Layers className="w-5 h-5 text-slate-600" />
+          </button>
+
           <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white shadow-lg" id="headline-logo">
             <CloudLightning className="w-5 h-5 animate-pulse text-white" />
           </div>
@@ -276,7 +416,12 @@ export default function App() {
 
         {/* Sync telemetry badges */}
         <div className="flex items-center gap-3" id="app-telemetry-box">
-          {recentSyncTime ? (
+          {isSyncingBackground ? (
+            <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 border border-blue-100 text-blue-600 rounded-full text-[10px] font-mono font-semibold" id="app-syncing-indicator-pill">
+              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+              <span>Syncing Cloud...</span>
+            </div>
+          ) : recentSyncTime ? (
             <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-green-50 border border-green-100 text-green-600 rounded-full text-[10px] font-mono font-semibold" id="app-sync-indicator-pill">
               <ShieldCheck className="w-3.5 h-3.5" />
               <span>Synced Backup {recentSyncTime}</span>
@@ -321,9 +466,18 @@ export default function App() {
           folders={folders}
           onSyncComplete={handleSyncComplete}
           onDisconnect={handleDisconnect}
+          mobileOpen={mobileSidebarOpen}
+          onCloseMobile={() => setMobileSidebarOpen(false)}
           onRestoreComplete={(data) => {
+            const currentJson = JSON.stringify({ files: data.files, folders: data.folders });
+            lastSavedJson.current = currentJson;
+
             if (data.files) updateFilesState(data.files);
             if (data.folders) updateFoldersState(data.folders);
+            if (data.messageId) {
+              setLastSyncedMessageId(data.messageId);
+              localStorage.setItem("tg_drive_last_message_id", String(data.messageId));
+            }
             const time = new Date().toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
             setRecentSyncTime(time);
             localStorage.setItem("tg_drive_synctime", time);

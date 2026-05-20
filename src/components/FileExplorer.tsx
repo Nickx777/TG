@@ -274,14 +274,14 @@ export default function FileExplorer({
         </div>
 
         {/* Search Bar / Action triggers */}
-        <div className="flex gap-3 items-center shrink-0" id="explorer-actions-bar">
+        <div className="flex flex-wrap sm:flex-nowrap gap-2 items-center w-full md:w-auto md:shrink-0" id="explorer-actions-bar">
           
-          <div className="relative" id="search-box-wrap">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 inset-y-0 my-auto" />
+          <div className="relative flex-1 sm:flex-initial" id="search-box-wrap">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3 inset-y-0 my-auto" />
             <input 
               type="text"
-              placeholder="Search contents..."
-              className="bg-slate-50 text-xs text-slate-750 placeholder-slate-400 px-4 pl-9 py-2 rounded-xl border border-slate-250 focus:bg-white focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 w-full md:w-48 transition-all"
+              placeholder="Search..."
+              className="bg-slate-50 text-xs text-slate-800 placeholder-slate-400 px-4 pl-9 py-2 rounded-xl border border-slate-200 focus:bg-white focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 w-full sm:w-40 md:w-48 transition-all"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               id="search-input"
@@ -290,7 +290,7 @@ export default function FileExplorer({
 
           <button 
             onClick={() => setShowFolderInput(!showFolderInput)}
-            className="w-[38px] h-[38px] flex items-center justify-center border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 rounded-xl hover:text-slate-850 hover:shadow-xs transition cursor-pointer"
+            className="w-[38px] h-[38px] shrink-0 flex items-center justify-center border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 rounded-xl hover:text-slate-800 hover:shadow-xs transition cursor-pointer"
             title="Create new folder"
             id="create-folder-btn"
           >
@@ -299,11 +299,12 @@ export default function FileExplorer({
 
           <button 
             onClick={() => fileInputRef.current?.click()}
-            className="flex items-center space-x-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs rounded-xl shadow-lg shadow-blue-100 hover:shadow-blue-200/50 transition cursor-pointer"
+            className="flex items-center space-x-1 px-3 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs rounded-xl shadow-lg shadow-blue-100 hover:shadow-blue-200/50 transition cursor-pointer shrink-0"
             id="select-upload-btn"
           >
             <Upload className="w-3.5 h-3.5" />
-            <span>Upload File</span>
+            <span className="sm:hidden">Upload</span>
+            <span className="hidden sm:inline">Upload File</span>
           </button>
           <input 
             type="file" 

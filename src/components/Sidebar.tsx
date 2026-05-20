@@ -18,7 +18,8 @@ import {
   HelpCircle,
   ExternalLink,
   ShieldAlert,
-  Download
+  Download,
+  XCircle
 } from "lucide-react";
 
 interface SidebarProps {
@@ -27,7 +28,9 @@ interface SidebarProps {
   folders: DriveFolder[];
   onSyncComplete: (restoredCount?: { files: number; folders: number }) => void;
   onDisconnect: () => void;
-  onRestoreComplete: (data: { files: DriveFile[]; folders: DriveFolder[] }) => void;
+  onRestoreComplete: (data: { files: DriveFile[]; folders: DriveFolder[]; messageId?: number }) => void;
+  mobileOpen?: boolean;
+  onCloseMobile?: () => void;
 }
 
 export default function Sidebar({ 
@@ -36,7 +39,9 @@ export default function Sidebar({
   folders, 
   onSyncComplete,
   onDisconnect,
-  onRestoreComplete
+  onRestoreComplete,
+  mobileOpen = false,
+  onCloseMobile
 }: SidebarProps) {
   const [syncing, setSyncing] = useState(false);
   const [syncSuccess, setSyncSuccess] = useState<string | null>(null);
@@ -96,10 +101,40 @@ export default function Sidebar({
   };
 
   return (
-    <div className="w-full lg:w-[280px] bg-white border-b lg:border-b-0 lg:border-r border-slate-200 p-6 flex flex-col justify-between shrink-0 shadow-xs" id="sidebar-root">
-      
-      {/* Upper Half: Identity and metrics */}
-      <div className="space-y-8" id="sidebar-upper-half">
+    <>
+      {/* Mobile Backdrop overlay */}
+      {mobileOpen && (
+        <div 
+          className="fixed inset-0 bg-slate-900/30 backdrop-blur-xs z-40 lg:hidden transition-opacity duration-300 animate-fade-in" 
+          onClick={onCloseMobile}
+          id="sidebar-mobile-backdrop"
+        />
+      )}
+
+      <div className={`
+        fixed inset-y-0 left-0 w-[285px] bg-white z-50 p-6 flex flex-col justify-between shrink-0 border-r border-slate-200 shadow-2xl lg:shadow-none h-full
+        transition-transform duration-300 ease-in-out lg:static lg:translate-x-0
+        ${mobileOpen ? "translate-x-0" : "-translate-x-full"}
+      `} id="sidebar-root">
+        
+        {/* Mobile Header Close block */}
+        <div className="flex lg:hidden items-center justify-between pb-4 border-b border-slate-100 mb-6 shrink-0" id="sidebar-mobile-header">
+          <div className="flex items-center gap-2">
+            <Cloud className="w-5 h-5 text-blue-600 animate-pulse" />
+            <span className="text-xs font-bold font-mono text-slate-800 uppercase tracking-widest">Drive Config</span>
+          </div>
+          <button 
+            onClick={onCloseMobile}
+            className="p-1 px-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition"
+            id="close-sidebar-mobile-btn"
+            title="Close Settings"
+          >
+            <XCircle className="w-5 h-5 text-slate-400 hover:text-rose-600" />
+          </button>
+        </div>
+
+        {/* Upper Half: Identity and metrics */}
+        <div className="space-y-8 overflow-y-auto pr-1" id="sidebar-upper-half">
         
         {/* Manual Cloud Auto Sync */}
         <div className="space-y-3" id="manual-sync-section">
@@ -186,5 +221,6 @@ export default function Sidebar({
       </div>
 
     </div>
+    </>
   );
 }

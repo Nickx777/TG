@@ -233,7 +233,7 @@ export async function backupMetadataToTelegram(
 export async function restoreMetadataFromTelegram(
   token: string,
   chatId: string
-): Promise<{ files: DriveFile[]; folders: DriveFolder[] } | null> {
+): Promise<{ files: DriveFile[]; folders: DriveFolder[]; messageId?: number } | null> {
   try {
     // 1. Fetch Chat details containing pinned_message
     const chatUrl = `https://api.telegram.org/bot${token.trim()}/getChat?chat_id=${chatId.trim()}`;
@@ -256,6 +256,7 @@ export async function restoreMetadataFromTelegram(
     }
 
     const fileId = doc.file_id;
+    const messageId = pinnedMessage.message_id;
 
     // 2. Download latest version of metadata via our proxy
     const proxyUrl = `/api/telegram/download?token=${token}&file_id=${fileId}&action=preview&filename=tg_drive_metadata.json`;
@@ -264,7 +265,11 @@ export async function restoreMetadataFromTelegram(
 
     const data = await downloadRes.json();
     if (data && Array.isArray(data.files) && Array.isArray(data.folders)) {
-      return data;
+      return {
+        files: data.files,
+        folders: data.folders,
+        messageId,
+      };
     }
     return null;
   } catch (err) {
