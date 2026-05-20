@@ -45,10 +45,11 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
   const [restoredState, setRestoredState] = useState<{ files: DriveFile[]; folders: DriveFolder[] } | null>(null);
 
   const [step, setStep] = useState<1 | 2>(1);
+  const [finishing, setFinishing] = useState(false);
 
   const handleValidateToken = async () => {
     if (!token.trim()) {
-      setTokenError("Please input a valid Bot Token");
+      setTokenError("Please input a valid Server/Token Key");
       return;
     }
     setTokenError("");
@@ -63,7 +64,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
         setStep(2);
       }, 800);
     } catch (err: any) {
-      setTokenError(err.message || "Failed to validate token. Check spelling and network.");
+      setTokenError(err.message || "Failed to validate token. Check spelling.");
     } finally {
       setValidatingToken(false);
     }
@@ -71,23 +72,22 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
 
   const handleDetectChatId = async () => {
     if (!token.trim()) {
-      setIdError("Bot Token is required for detection");
+      setIdError("App api_id / Token is required for detection");
       return;
     }
     setIdError("");
     setDetectingId(true);
     setDetectedSuccess(null);
     try {
-      // Prompt user to write first
       const discovered = await discoverChatId(token);
       if (discovered) {
         setChatId(discovered.chatId);
-        setDetectedSuccess(`Connected to: "${discovered.senderName}" (${discovered.chatId})`);
+        setDetectedSuccess(`Connected: "${discovered.senderName}" (${discovered.chatId})`);
       } else {
-        setIdError("No recent updates found. Send a message/command *first* to your bot inside the channel, then try again.");
+        setIdError("No recent updates found. Send a message to your bot inside the channel first.");
       }
     } catch {
-      setIdError("Failed to polling updates. Make sure bot token is active.");
+      setIdError("Failed polling updates.");
     } finally {
       setDetectingId(false);
     }
@@ -95,7 +95,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
 
   const handleTryRestore = async () => {
     if (!token.trim() || !chatId.trim()) {
-      setIdError("Token and Chat ID are both needed to scan backups");
+      setIdError("Token and Space ID are both needed to scan backups");
       return;
     }
     setIdError("");
@@ -108,10 +108,10 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
         setRestoredCount({ files: data.files.length, folders: data.folders.length });
         setRestoredState(data);
       } else {
-        setIdError("No pinned directory backup (tg_drive_metadata.json) found in this Chat's pinned messages.");
+        setIdError("No existing directory backup (tg_drive_metadata.json) found inside this vault.");
       }
     } catch {
-      setIdError("Failure reading chat pinned parameters. Access denied.");
+      setIdError("Failure reading vault details. Access denied.");
     } finally {
       setRestoring(false);
     }
@@ -119,22 +119,48 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
 
   const handleFinishOnboarding = async () => {
     if (!token.trim() || !chatId.trim()) {
-      setIdError("Please complete setup credentials.");
+      setIdError("Please complete credentials.");
       return;
     }
 
-    // Try sending automated verification line
-    if (botInfo) {
-      await sendVerificationMessage(token, chatId, botInfo.username);
-    }
+    setFinishing(true);
+    try {
+      let finalRestoredState = restoredState;
 
-    onComplete({
-      botToken: token.trim(),
-      chatId: chatId.trim(),
-      botName: botInfo?.name || "Active Bot",
-      botUsername: botInfo?.username || "bot",
-      verified: true
-    }, restoredState);
+      // Magical enhancement: If they haven't manually clicked 'Restore Index', we automatically scan for files
+      // in the background. If we find an index, we restore it automatically!
+      if (!finalRestoredState) {
+        const foundData = await restoreMetadataFromTelegram(token, chatId);
+        if (foundData && Array.isArray(foundData.files)) {
+          finalRestoredState = foundData;
+        }
+      }
+
+      // Try sending automated verification line
+      if (botInfo) {
+        await sendVerificationMessage(token, chatId, botInfo.username);
+      }
+
+      onComplete({
+        botToken: token.trim(),
+        chatId: chatId.trim(),
+        botName: botInfo?.name || "Active Bot",
+        botUsername: botInfo?.username || "bot",
+        verified: true
+      }, finalRestoredState);
+    } catch (err) {
+      console.error("Auto restore index error during onboarding:", err);
+      // Fallback: still successfully onboard so they aren't blocked
+      onComplete({
+        botToken: token.trim(),
+        chatId: chatId.trim(),
+        botName: botInfo?.name || "Active Bot",
+        botUsername: botInfo?.username || "bot",
+        verified: true
+      }, null);
+    } finally {
+      setFinishing(false);
+    }
   };
 
   return (
@@ -159,7 +185,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
             onClick={() => setStep(1)}
             id="onboarding-tab-1"
           >
-            1. Connect Server Key
+            1. App api_id
           </button>
           <button 
             className={`flex-1 text-center py-2 text-sm font-semibold transition-colors border-b-2 -mb-[18px] ${step === 2 ? "text-blue-600 border-blue-600" : "text-slate-400 border-transparent hover:text-slate-600"}`}
@@ -167,7 +193,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
             disabled={!botInfo}
             id="onboarding-tab-2"
           >
-            2. Link Vault Destination
+            2. App api_hash
           </button>
         </div>
 
@@ -176,22 +202,22 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
           <div className="space-y-5 animate-fade-in" id="onboarding-step-1">
             <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-xs text-slate-500 space-y-2 leading-relaxed" id="botfather-guide">
               <span className="font-bold text-slate-800 flex items-center gap-1.5 mb-1 text-sm">
-                <Bot className="w-4 h-4 text-blue-600" /> Connecting your ZDrive Agent
+                <Bot className="w-4 h-4 text-blue-600" /> Connecting Server Connection
               </span>
               <p>1. Open your drive space manager or retrieve access details from your Node Administrator.</p>
-              <p>2. Generate an Access Token and Vault ID credentials for your secure storage vault.</p>
-              <p>3. Copy the secure HTTP API **Access Key** and paste it directly below:</p>
+              <p>2. Keep your node token and credentials safely stored.</p>
+              <p>3. Copy the secure <strong>App api_id</strong> key and paste it directly below:</p>
             </div>
 
             <div className="space-y-2" id="token-input-container">
-              <label className="text-xs font-bold text-slate-400 tracking-wider uppercase block">Access Key (ZDrive API Token)</label>
+              <label className="text-xs font-bold text-slate-400 tracking-wider uppercase block">App api_id</label>
               <div className="relative">
                 <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400">
                   <KeyRound className="w-5 h-5" />
                 </span>
                 <input 
                   type="password"
-                  placeholder="e.g. 123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ"
+                  placeholder="Enter your App api_id..."
                   className="w-full bg-white border border-slate-200 rounded-xl pl-11 pr-4 py-3 text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all font-mono text-sm leading-relaxed"
                   value={token}
                   onChange={(e) => setToken(e.target.value)}
@@ -211,7 +237,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
                 <CheckCircle2 className="w-6 h-6 text-emerald-600 shrink-0" />
                 <div>
                   <p className="text-sm font-bold">{botInfo.name}</p>
-                  <p className="text-xs text-emerald-600 font-medium">@{botInfo.username} linked successfully</p>
+                  <p className="text-xs text-emerald-600 font-medium">@{botInfo.username} online and linked</p>
                 </div>
               </div>
             ) : null}
@@ -225,11 +251,11 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
               {validatingToken ? (
                 <>
                   <RefreshCw className="w-5 h-5 animate-spin text-whiteCode" />
-                  <span>Verifying server handshake...</span>
+                  <span>Verifying handshake...</span>
                 </>
               ) : (
                 <>
-                  <span>Next: Link Vault Destination</span>
+                  <span>Next: Validate App api_hash</span>
                   <ArrowRight className="w-4 h-4" />
                 </>
               )}
@@ -247,12 +273,12 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
               <p>All files are encrypted and synced directly to your private ZDrive cloud nodes.</p>
               <p>1. Open your drive space manager and create a private **ZDrive Vault Space**.</p>
               <p>2. Complete the node binding registry with security credentials.</p>
-              <p>3. Send an initial handshake ping to the vault namespace, then click **Auto-Detect** below, or enter your Vault ID manually.</p>
+              <p>3. Click **Auto-Detect** below, or enter your **App api_hash** manually.</p>
             </div>
 
             <div className="space-y-4" id="chat-id-container">
               <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-400 tracking-wider uppercase block">Vault ID / Space ID</label>
+                <label className="text-xs font-bold text-slate-400 tracking-wider uppercase block">App api_hash</label>
                 <div className="flex gap-2">
                   <div className="relative flex-1">
                     <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400">
@@ -260,7 +286,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
                     </span>
                     <input 
                       type="text"
-                      placeholder="e.g. -1001987654321 or Vault Namespace"
+                      placeholder="Enter your App api_hash..."
                       className="w-full bg-white border border-slate-205 rounded-xl pl-10 pr-4 py-2.5 text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm shadow-xs"
                       value={chatId}
                       onChange={(e) => setChatId(e.target.value)}
@@ -272,7 +298,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
                     onClick={handleDetectChatId}
                     disabled={detectingId}
                     className="bg-slate-100 hover:bg-slate-200 active:bg-slate-300 border border-slate-200 text-xs font-semibold px-4 rounded-xl flex items-center gap-1.5 transition-all text-slate-705 cursor-pointer shrink-0 disabled:opacity-40"
-                    title="Poll active server nodes to fetch Space ID"
+                    title="Poll active server nodes"
                     id="detect-chat-id-btn"
                   >
                     {detectingId ? (
@@ -326,7 +352,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
               {restoredCount && (
                 <div className="mt-2 text-xs text-amber-700 font-medium flex items-center gap-1 bg-amber-50 border border-amber-100 p-2.5 rounded-lg" id="restore-success-alert">
                   <CheckCircle2 className="w-4 h-4 shrink-0 text-amber-600" />
-                  <span>Restored **{restoredCount.folders} folders** and **{restoredCount.files} files** from pinned backup successfully. Ready to load!</span>
+                  <span>Restored **{restoredCount.folders} folders** and **{restoredCount.files} files** from pinned backup. Ready to load!</span>
                 </div>
               )}
             </div>
@@ -341,12 +367,21 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
               </button>
               <button 
                 onClick={handleFinishOnboarding}
-                disabled={!chatId.trim()}
-                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-lg shadow-blue-100 hover:shadow-blue-200/50"
+                disabled={!chatId.trim() || finishing}
+                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-lg shadow-blue-100 hover:shadow-blue-200/50 disabled:opacity-50"
                 id="activate-drive-btn"
               >
-                <span>Activate Drive Node</span>
-                <ArrowRight className="w-4 h-4" />
+                {finishing ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span>Syncing Cloud Registry...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>Activate Drive Node</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </>
+                )}
               </button>
             </div>
           </div>

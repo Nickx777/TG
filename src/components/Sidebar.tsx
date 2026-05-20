@@ -5,7 +5,7 @@
 
 import React, { useState } from "react";
 import { TelegramConfig, DriveFile, DriveFolder } from "../types";
-import { backupMetadataToTelegram } from "../lib/telegram";
+import { backupMetadataToTelegram, restoreMetadataFromTelegram } from "../lib/telegram";
 import { 
   Cloud, 
   Bot, 
@@ -17,7 +17,8 @@ import {
   HardDrive, 
   HelpCircle,
   ExternalLink,
-  ShieldAlert
+  ShieldAlert,
+  Download
 } from "lucide-react";
 
 interface SidebarProps {
@@ -26,6 +27,7 @@ interface SidebarProps {
   folders: DriveFolder[];
   onSyncComplete: (restoredCount?: { files: number; folders: number }) => void;
   onDisconnect: () => void;
+  onRestoreComplete: (data: { files: DriveFile[]; folders: DriveFolder[] }) => void;
 }
 
 export default function Sidebar({ 
@@ -33,11 +35,16 @@ export default function Sidebar({
   files, 
   folders, 
   onSyncComplete,
-  onDisconnect
+  onDisconnect,
+  onRestoreComplete
 }: SidebarProps) {
   const [syncing, setSyncing] = useState(false);
   const [syncSuccess, setSyncSuccess] = useState<string | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
+
+  const [restoring, setRestoring] = useState(false);
+  const [restoreSuccess, setRestoreSuccess] = useState<string | null>(null);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
 
   const formattedTotalSize = (() => {
     const totalBytes = files.reduce((acc, f) => acc + f.size, 0);
@@ -68,6 +75,26 @@ export default function Sidebar({
     }
   };
 
+  const handleRestoreBackup = async () => {
+    setRestoring(true);
+    setRestoreSuccess(null);
+    setRestoreError(null);
+    try {
+      const data = await restoreMetadataFromTelegram(config.botToken, config.chatId);
+      if (data && Array.isArray(data.files)) {
+        onRestoreComplete(data);
+        const time = new Date().toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+        setRestoreSuccess(`Restored ${data.files.length} items successfully!`);
+      } else {
+        setRestoreError("No layout backup found in your secure vault.");
+      }
+    } catch {
+      setRestoreError("Server handshake failed. Access denied.");
+    } finally {
+      setRestoring(false);
+    }
+  };
+
   return (
     <div className="w-full lg:w-[280px] bg-white border-b lg:border-b-0 lg:border-r border-slate-200 p-6 flex flex-col justify-between shrink-0 shadow-xs" id="sidebar-root">
       
@@ -80,12 +107,22 @@ export default function Sidebar({
           
           <button 
             onClick={handleSyncBackup}
-            disabled={syncing}
+            disabled={syncing || restoring}
             className="w-full bg-white hover:bg-slate-50 active:bg-slate-100 border border-slate-200 text-slate-700 font-semibold py-3 px-4 rounded-xl text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-xs disabled:opacity-45"
             id="sync-backup-btn"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${syncing ? "animate-spin text-blue-600" : "text-slate-500"}`} />
             <span>Backup Folder Structure</span>
+          </button>
+
+          <button 
+            onClick={handleRestoreBackup}
+            disabled={restoring || syncing}
+            className="w-full bg-slate-50 hover:bg-slate-100 active:bg-slate-200 border border-slate-200 text-slate-700 font-semibold py-3 px-4 rounded-xl text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-xs disabled:opacity-45"
+            id="sync-restore-btn"
+          >
+            <Download className={`w-3.5 h-3.5 ${restoring ? "animate-spin text-blue-600" : "text-slate-400"}`} />
+            <span>Restore From Cloud Backup</span>
           </button>
 
           {syncSuccess && (
@@ -99,6 +136,20 @@ export default function Sidebar({
             <div className="flex items-center gap-1.5 text-[10px] text-rose-600 bg-rose-50 border border-rose-100 p-2.5 rounded-lg font-semibold" id="sidebar-sync-error">
               <AlertCircle className="w-3.5 h-3.5 shrink-0" />
               <span>{syncError}</span>
+            </div>
+          )}
+
+          {restoreSuccess && (
+            <div className="flex items-center gap-1.5 text-[10px] text-emerald-600 bg-emerald-50 border border-emerald-100 p-2.5 rounded-lg font-semibold" id="sidebar-restore-success">
+              <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+              <span>{restoreSuccess}</span>
+            </div>
+          )}
+
+          {restoreError && (
+            <div className="flex items-center gap-1.5 text-[10px] text-rose-600 bg-rose-50 border border-rose-100 p-2.5 rounded-lg font-semibold" id="sidebar-restore-error">
+              <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+              <span>{restoreError}</span>
             </div>
           )}
         </div>

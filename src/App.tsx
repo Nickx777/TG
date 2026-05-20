@@ -10,7 +10,7 @@ import FileExplorer from "./components/FileExplorer";
 import FilePreviewModal from "./components/FilePreviewModal";
 import ShareViewer from "./components/ShareViewer";
 import { TelegramConfig, DriveFile, DriveFolder, ActiveUpload, SharedFilePayload } from "./types";
-import { CloudLightning, ShieldCheck, RefreshCw, Layers } from "lucide-react";
+import { CloudLightning, ShieldCheck, RefreshCw, Layers, LogOut } from "lucide-react";
 
 export default function App() {
   // --- 1. ROUTING & SHARE ENGINE ---
@@ -288,17 +288,31 @@ export default function App() {
             </div>
           )}
 
-          {/* Connected bot status */}
-          <div className="text-right text-xs" id="header-user-badge">
-            <span className="text-slate-400 font-mono text-[9px] uppercase block tracking-wider leading-none">Status</span>
-            <span className="text-green-600 font-bold block mt-0.5 leading-none">● Secure Space</span>
+          {/* Connected status with direct action logout button */}
+          <div className="flex items-center gap-3" id="user-logout-wrapper">
+            <div className="text-right text-xs" id="header-user-badge">
+              <span className="text-slate-400 font-mono text-[9px] uppercase block tracking-wider leading-none">Status</span>
+              <span className="text-green-600 font-bold block mt-0.5 leading-none">● Secure Space</span>
+            </div>
+            <button
+              onClick={() => {
+                if (confirm("Disconnect server node? Your credentials cache and files index will be wiped from this browser.")) {
+                  handleDisconnect();
+                }
+              }}
+              className="p-2 text-rose-600 hover:text-white hover:bg-rose-600 border border-rose-200 hover:border-transparent rounded-xl transition cursor-pointer"
+              title="Disconnect Node"
+              id="header-disconnect-btn"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
           </div>
         </div>
 
       </header>
 
-      {/* 2. Main content grids splits */}
-      <div className="flex-1 flex flex-col lg:flex-row overflow-hidden" id="app-layouts-container">
+      {/* 2. Main content grids splits - responsive flex height controls */}
+      <div className="flex-1 flex flex-col lg:flex-row lg:overflow-hidden overflow-y-auto" id="app-layouts-container">
         
         {/* Left column sidebar settings info */}
         <Sidebar 
@@ -307,6 +321,13 @@ export default function App() {
           folders={folders}
           onSyncComplete={handleSyncComplete}
           onDisconnect={handleDisconnect}
+          onRestoreComplete={(data) => {
+            if (data.files) updateFilesState(data.files);
+            if (data.folders) updateFoldersState(data.folders);
+            const time = new Date().toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+            setRecentSyncTime(time);
+            localStorage.setItem("tg_drive_synctime", time);
+          }}
         />
 
         {/* Right column file structures directory panel */}
