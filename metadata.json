@@ -1,0 +1,6 @@
+{
+  "name": "ZDrive",
+  "description": "A premium, secure cloud storage system powered by ZDrive's backend for unlimited and highly customizable storage with an amazing folder structure and previews.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
